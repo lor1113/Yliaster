@@ -1,0 +1,30 @@
+{
+  "name": "testProcess",
+  "description": "process for testing machine",
+  "forMachine": "testMachine",
+  "stages": {
+    "0": {
+      "name": "setupStage",
+      "description": "blah blah",
+      "overrides": {},
+      "stageControl": "target",
+      "controlData": {"temperature": ["above", 50]},
+      "variableTargets": {"temperature": 55},
+      "recalculateTimers": false
+    },
+    "1": {
+      "name": "processStage",
+      "description": "blah blah2",
+      "overrides": {},
+      "stageControl": "time",
+      "controlData": 10000,
+      "variableTargets": {"temperature": 55},
+      "effectorSettings": {"processPump1": 1},
+      "recalculateTimers": false
+    },
+    "2": {
+      "name": "shutdownStage",
+      "stageControl": "shutdown"
+    }
+  }
+}

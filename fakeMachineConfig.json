@@ -1,0 +1,57 @@
+{
+  "name": "testMachine",
+  "description": "lol",
+  "variables": {
+    "temperature": {
+      "name": "temperature",
+      "description": "Machine internal temperature",
+      "safeMax": 100,
+      "safeMin": 0,
+      "shutdownMin": 18,
+      "shutdownMax": 30,
+      "sensorMixing": "min",
+      "visible": true,
+      "defaultTarget": 23
+    }
+  },
+  "measurers": {
+    "temperatureProbe1": {
+      "name": "temperatureProbe1",
+      "description": "Machine internal temperature probe",
+      "active": true,
+      "variable": "temperature",
+      "driverKey": "heatMeasurer",
+      "remeasureMS": 1000
+    },
+    "temperatureProbe2":{
+      "name": "temperatureProbe2",
+      "description": "Machine internal temperature probe",
+      "active": true,
+      "variable": "temperature",
+      "driverKey": "heatMeasurer",
+      "remeasureMS": 1000,
+      "offsetMS": 500
+      }
+    },
+  "effectors": {
+    "temperatureController1": {
+      "name": "temperatureController1",
+      "description": "Machine temperature controller",
+      "active": true,
+      "controlType": "binary",
+      "controlVariable": "temperature",
+      "controlData": 20,
+      "readjustMS": 5000,
+      "shutdownSetting": 0,
+      "driverKey": "heatEffector"
+    },
+    "processPump1":{
+      "name": "processPump1",
+      "description": "Primary circulation pump",
+      "active": true,
+      "controlType": "static",
+      "shutdownSetting": 0,
+      "driverKey": "pumpControl"
+    }
+  }
+}

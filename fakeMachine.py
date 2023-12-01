@@ -13,12 +13,10 @@ class FakeMachine:
         variable.valueTime = self.machineTime
         self.variables.append(variable)
 
-    def addMeasurer(self, measurer, value):
-        measurer.value = value
+    def addMeasurer(self, measurer):
         self.measurers.append(measurer)
 
-    def addEffector(self, effector, value):
-        effector.value = value
+    def addEffector(self, effector):
         self.effectors.append(effector)
 
 
@@ -55,12 +53,17 @@ class FakeMachineEffector:
     def __init__(self, variable, effectorDelta):
         self.variable = variable
         self.effectorDelta = effectorDelta
+        self.enabled = False
 
     def setEffector(self, toggle):
         if toggle:
-            self.enableEffector()
+            if not self.enabled:
+                self.enabled = True
+                self.enableEffector()
         else:
-            self.disableEffector()
+            if self.enabled:
+                self.enabled = False
+                self.disableEffector()
 
     def enableEffector(self):
         self.variable.updateValue()
@@ -70,3 +73,11 @@ class FakeMachineEffector:
         self.variable.updateValue()
         self.variable.effectorDelta -= self.effectorDelta
 
+
+testMachine = FakeMachine("testMachine")
+testVariable = FakeMachineVariable("Heat", 30, 25, 0.9)
+testMachine.addVariable(testVariable)
+testMeasurer = FakeMachineMeasurer(testVariable)
+testMachine.addMeasurer(testMeasurer)
+testEffector = FakeMachineEffector(testVariable, 100)
+testMachine.addEffector(testEffector)
