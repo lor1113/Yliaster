@@ -1,7 +1,7 @@
-import copy
 import json
+import copy
 
-from fakeMachineDriver import deviceDrivers
+from fakeMachineDriver import fakeDeviceDrivers
 
 machineConfigRules = {
     "requiredKeywords": ["name", "variables", "measurers", "effectors"],
@@ -9,18 +9,19 @@ machineConfigRules = {
 }
 
 variableConfigRules = {
-    "requiredKeywords": ["name", "visible", "defaultTarget"],
-    "optionalKeywords": ["description", "safeMax", "safeMin", "shutdownMin", "shutdownMax", "sensorMixing"],
+    "requiredKeywords": ["name", "visible"],
+    "optionalKeywords": ["description", "safeRange", "shutdownRange", "sensorMixing"],
 }
 
 measurerConfigRules = {
-    "requiredKeywords": ["name", "variable", "driverKey", "remeasureMS", "active"],
+    "requiredKeywords": ["name", "variable", "driverKey", "iterateMS", "active"],
     "optionalKeywords": ["description", "offsetMS"],
 }
 
 effectorConfigRules = {
     "requiredKeywords": ["name", "driverKey", "controlType", "shutdownSetting", "active"],
-    "optionalKeywords": ["description", "controlVariable", "controlData", "readjustMS", "offsetMS"]
+    "optionalKeywords": ["description", "controlVariable", "controlBinaryThreshold", "controlLookupTable",
+                         "controlPIDConsts", "minChangeDelayMS"]
 }
 
 processConfigRules = {
@@ -29,9 +30,9 @@ processConfigRules = {
 }
 
 stageConfigRules = {
-    "requiredKeywords": ["name", "stageControl"],
-    "optionalKeywords": ["description", "overrides", "controlData", "variableTargets", "effectorSettings",
-                         "recalculateTimers"]
+    "requiredKeywords": ["name", "stageEndControl"],
+    "optionalKeywords": ["description", "overrides", "variableTargets", "effectorSettings",
+                         "recalculateTimers", "stageEndTimer", "stageEndTarget"]
 }
 
 bannedOverrideKeys = ["name", "description"]
@@ -43,259 +44,312 @@ configTypeRules = {
     "effectors": "dict",
     "description": "str",
     "visible": "bool",
-    "recalculateMS": "int",
+    "iterateMS": "int",
+    "minChangeDelayMS": "int",
     "defaultTarget": "int",
-    "safeMax": "int",
-    "safeMin": "int",
-    "shutdownMin": "int",
-    "shutdownMax": "int",
+    "safeRange": "list",
+    "shutdownRange": "list",
     "sensorMixing": "str",
     "driverKey": "str",
     "controlType": "str",
     "shutdownSetting": "int",
     "controlVariable": "str",
-    "readjustMS": "int",
-    "stageControl": "str",
+    "stageEndControl": "str",
     "overrides": "dict",
     "recalculateTimers": "bool",
-    "active": "bool"
+    "active": "bool",
+    "controlBinaryThreshold": "int",
+    "controlPIDConsts": "list",
+    "controlLookupTable": "list",
+    "stageEndTimer": "int",
+    "stageEndTarget": "dict"
 }
 
 configEnumRules = {
     "sensorMixing": ["min", "max", "avg"],
-    "controlType": ["static", "threshold", "PID", "binary", "binaryInverted"],
-    "stageControl": ["target", "time", "shutdown"],
-    "stageControlTargets": ["above", "below"]
+    "controlType": ["static", "lookupMin", "lookupMax", "lookupClosest", "PID", "binary", "binaryInverted"],
+    "stageEndControl": ["target", "time", "shutdown"]
 }
 
-controlTypeRequirements = {
-    "static": {},
-    "threshold": {"controlData": "dict", "controlVariable": "str"},
-    "PID": {"controlData": "list", "controlVariable": "str"},
-    "binary": {"controlData": "int", "controlVariable": "str"},
-    "binaryInverted": {"controlData": "int", "controlVariable": "str"}
+variableValueRequirements = {
+    "controlType": {
+        "lookupMin": ["controlLookupTable", "controlVariable"],
+        "lookupMax": ["controlLookupTable", "controlVariable"],
+        "lookupClosest": ["controlLookupTable", "controlVariable"],
+        "PID": ["controlPIDConsts", "controlVariable"],
+        "binary": ["controlBinaryThreshold", "controlVariable"],
+        "binaryInverted": ["controlBinaryThreshold", "controlVariable"]
+    },
+    "stageEndControl": {
+        "target": ["stageEndTarget"],
+        "time": ["stageEndTimer"]
+    }
+}
+
+variableNames = []
+measurerNames = []
+effectorNames = []
+
+
+class ValidationException(Exception):
+    pass
+
+
+def testSafeRange(test):
+    if type(test).__name__ != "list":
+        return False
+    if len(test) != 2:
+        return False
+    if type(test[0]).__name__ != "int" or type(test[1]).__name__ != "int":
+        return False
+    if test[0] == test[1]:
+        return False
+    return True
+
+
+def testPID(test):
+    if type(test).__name__ != "list":
+        return False
+    if len(test) != 3:
+        return False
+    if type(test[0]).__name__ != "int" or type(test[1]).__name__ != "int" or type(test[2]).__name__ != "int":
+        return False
+
+
+def testLookupTable(test):
+    if type(test).__name__ != "list":
+        return False
+    if len(test) == 0:
+        return False
+    for x in test:
+        if type(x).__name__ != "list":
+            return False
+        if len(x) != 2:
+            return False
+        if type(x[0]).__name__ != "int":
+            return False
+    return True
+
+
+def testStages(test):
+    counter = 0
+    keys = list(test.keys())
+    while str(counter) in keys:
+        keys.remove(str(counter))
+        counter += 1
+    if len(keys) != 0:
+        return False
+    return True
+
+
+def testVariableTargets(test):
+    if type(test).__name__ != "dict":
+        return False
+    for key, value in test.items():
+        if key not in variableNames:
+            return False
+        if type(value).__name__ != "int":
+            return False
+    return True
+
+
+def testEffectorSettings(test):
+    if type(test).__name__ != "dict":
+        return False
+    for key, value in test.items():
+        if key not in effectorNames:
+            return False
+        if type(value).__name__ != "int":
+            return False
+    return True
+
+
+def testStageEndTarget(test):
+    if type(test).__name__ != "dict":
+        return False
+    for key, value in test.items():
+        if key not in variableNames:
+            return False
+        if type(value).__name__ != "list":
+            return False
+        if len(value) != 2:
+            return False
+        if value[0] not in ["above", "below"]:
+            return False
+        if type(value[1]).__name__ != "int":
+            return False
+    return True
+
+
+variableTestFunctions = {
+    "safeRange": testSafeRange,
+    "shutdownRange": testSafeRange,
+    "controlPIDConsts": testPID,
+    "controlLookupTable": testLookupTable,
+    "stages": testStages,
+    "variableTargets": testVariableTargets,
+    "effectorSettings": testEffectorSettings,
+    "stageEndTarget": testStageEndTarget
+}
+
+variableTestFunctionFailMessages = {
+    "safeRange": "Needs to be a list with two non equal integers",
+    "shutdownRange": "Needs to be a list with two non equal integers",
+    "controlPIDConsts": "Needs to be a list with three integers",
+    "controlLookupTable": "Needs to be a list of tuples with each first tuple element being an integer.",
+    "stages": "Stage keys must start from 0 and count up by one, with lower numbered stages going first.",
+    "variableTargets": "Must be a dictionary where each key is a valid variable and each value is an integer",
+    "effectorSettings": "Must be a dictionary where each key is a valid effector and each value is an integer",
+    "stageEndTarget": "Must be a dictionary where each key is a valid variable and each value is a tuple where the "
+                      "first value is one of 'above' and 'below' and the second value is an integer"
 }
 
 
-def applyOverride(config, override):
-    for key, value in override.items():
+def validateSection(sectionKey, sectionData, sectionRules, message):
+    requiredKeywords = copy.copy(sectionRules["requiredKeywords"])
+    if "name" not in sectionData:
+        raise ValidationException(message + sectionKey + " Lacks name variable")
+    message = message + sectionData["name"] + ": "
+    if sectionKey:
+        if sectionKey != sectionData["name"]:
+            raise ValidationException(message + sectionKey + " Name variable does not match JSON key")
+    for keyword, keyValue in sectionData.items():
+        keyValue = sectionData[keyword]
+        if keyword not in sectionRules["requiredKeywords"] and keyword not in sectionRules["optionalKeywords"]:
+            raise ValidationException(message + "Invalid keyword: " + keyword)
+        if keyword in configTypeRules:
+            if type(keyValue).__name__ != configTypeRules[keyword]:
+                raise ValidationException(message + "Invalid type for keyword: " + str(keyword) + ". Expected: " +
+                                          configTypeRules[keyword] + " Received: " + type(keyValue).__name__)
+        if keyword in configEnumRules:
+            if keyValue not in configEnumRules[keyword]:
+                raise ValidationException(message + "Invalid value for keyword: " + keyword)
+        if keyword in variableValueRequirements:
+            if keyValue in variableValueRequirements[keyword]:
+                requiredKeywords.extend(variableValueRequirements[keyword][keyValue])
+        if keyword in variableTestFunctions:
+            if not variableTestFunctions[keyword](keyValue):
+                if keyword in variableTestFunctionFailMessages:
+                    raise ValidationException(message + "Validation function failed for " + keyword + " " +
+                                              variableTestFunctionFailMessages[keyword])
+                else:
+                    raise ValidationException(message + "Validation function failed for " + keyword)
+
+    for keyword in requiredKeywords:
+        if keyword not in sectionData:
+            raise ValidationException(message + "Missing required keyword: " + keyword)
+    return True
+
+
+def validateMachineConfig(machineConfig, deviceDrivers, message):
+    validateSection(False, machineConfig, machineConfigRules, message)
+    for variableKey, variableData in machineConfig["variables"].items():
+        validateSection(variableKey, variableData, variableConfigRules, message + "Variable: ")
+    for measurerKey, measurerData in machineConfig["measurers"].items():
+        validateSection(measurerKey, measurerData, measurerConfigRules, message + "Measurer: ")
+    for effectorKey, effectorData in machineConfig["effectors"].items():
+        validateSection(effectorKey, effectorData, effectorConfigRules, message + "Effector: ")
+    effectorVariables = [x["controlVariable"] for x in machineConfig["effectors"].values() if "controlVariable" in x]
+    for x in effectorVariables:
+        if x not in machineConfig["variables"]:
+            raise ValidationException(message + "Effector variable " + str(x) + " is not present.")
+    measurerVariables = [x["variable"] for x in machineConfig["measurers"].values()]
+    for x in measurerVariables:
+        if x not in machineConfig["variables"]:
+            raise ValidationException(message + "Measurer variable " + str(x) + " is not present.")
+    driverKeys = [x["driverKey"] for x in machineConfig["measurers"].values()] + \
+                 [x["driverKey"] for x in machineConfig["effectors"].values()]
+    for x in driverKeys:
+        if x not in deviceDrivers:
+            raise ValidationException(message + "Driver " + str(x) + " is not present.")
+
+
+def validateProcessConfig(processConfig, message):
+    validateSection(False, processConfig, processConfigRules, message)
+    for stage in processConfig["stages"].values():
+        validateSection(False, stage, stageConfigRules, message)
+
+
+def testName(segment, message):
+    if "name" not in segment:
+        raise ValidationException(message + "name variable is not present")
+    if type(segment["name"]).__name__ != "str":
+        raise ValidationException(message + "name variable " + str(segment["name"]) + " is not a string.")
+
+
+def validateNamespace(machineConfig, processConfig):
+    global variableNames
+    global measurerNames
+    global effectorNames
+    testName(machineConfig, "Machine config: ")
+    machineNamespace = [machineConfig["name"]]
+    for variable in machineConfig["variables"].values():
+        testName(variable, "Variable: ")
+        if variable["name"] in machineNamespace:
+            raise ValidationException("Namespace collision: Variable name " + variable["name"] + " already used.")
+        machineNamespace.append(variable["name"])
+        variableNames.append(variable["name"])
+    for measurer in machineConfig["measurers"].values():
+        testName(measurer, "Measurer: ")
+        if measurer["name"] in machineNamespace:
+            raise ValidationException("Namespace collision: Measurer name " + measurer["name"] + " already used.")
+        machineNamespace.append(measurer["name"])
+        measurerNames.append(measurer["name"])
+    for effector in machineConfig["effectors"].values():
+        testName(effector, "Effector: ")
+        if effector["name"] in machineNamespace:
+            raise ValidationException("Namespace collision: Effector name " + effector["name"] + " already used.")
+        machineNamespace.append(effector["name"])
+        effectorNames.append(effector["name"])
+    testName(processConfig, "Process Config: ")
+    processNamespace = [processConfig["name"]]
+    for stage in processConfig["stages"].values():
+        testName(stage, "Process Stage: ")
+        if stage["name"] in processNamespace:
+            raise ValidationException("Namespace collision: Stage name " + stage["name"] + " already used")
+        processNamespace.append(stage["name"])
+    if "forMachine" not in processConfig:
+        raise ValidationException("Process config does not have forMachine")
+    if type(processConfig["forMachine"]).__name__ != "str":
+        raise ValidationException("Process config forMachine is not string")
+    if processConfig["forMachine"] != machineConfig["name"]:
+        raise ValidationException("Process config forMachine '" + processConfig["forMachine"] + "' and machine name '" +
+                                  machineConfig["name"] + "' do not match.")
+
+
+def applyOverrides(config, overrides, message):
+    for key, value in overrides.items():
         if key in bannedOverrideKeys:
-            return False, "Invalid override keyword: " + key
-        if key in config.keys():
+            raise ValidationException(message + "Invalid override keyword: " + key)
+        if key in config:
             if type(value).__name__ == "dict":
-                applyOverride(config[key], value)
+                applyOverrides(config[key], value, message)
             else:
                 config[key] = value
     return True, ""
 
 
-def validateConfig(config, configRules):
-    keys = config.keys()
-    for keyword in configRules["requiredKeywords"]:
-        if keyword not in keys:
-            return False, "Missing required keyword: " + keyword
-    for keyword in keys:
-        if keyword not in configRules["requiredKeywords"] and keyword not in configRules["optionalKeywords"]:
-            return False, "Invalid keyword: " + keyword
-        if keyword in configTypeRules.keys():
-            if type(config[keyword]).__name__ != configTypeRules[keyword]:
-                return False, "Invalid type for keyword: " + keyword + ". Expected: " + configTypeRules[
-                    keyword] + " Received: " + type(config[keyword]).__name__
-        if keyword in configEnumRules.keys():
-            if config[keyword] not in configEnumRules[keyword]:
-                return False, "Invalid value for keyword: " + keyword
-    return True, ""
-
-
-def validateMachineConfig(machineConfig, deviceDrivers):
-    valid, message = validateConfig(machineConfig, machineConfigRules)
-    if not valid:
-        return False, message
-    variableNames = []
-    measurerVariables = []
-    multipleMeasurers = []
-    for variable in machineConfig["variables"].values():
-        try:
-            subMessage = str(variable["name"]) + ": "
-        except KeyError:
-            return False, "Variable missing name"
-        except TypeError:
-            return False, "Invalid variable name: " + str(variable["name"])
-        valid, message = validateConfig(variable, variableConfigRules)
-        if not valid:
-            return False, subMessage + message
-        if variable["name"] in variableNames:
-            return False, subMessage + "Duplicate variable name: " + variable["name"]
-        variableNames.append(variable["name"])
-    measurerNames = []
-    for measurer in machineConfig["measurers"].values():
-        try:
-            subMessage = str(measurer["name"]) + ": "
-        except KeyError:
-            return False, "Measurer missing name"
-        except TypeError:
-            return False, "Invalid measurer name: " + str(measurer["name"])
-        valid, message = validateConfig(measurer, measurerConfigRules)
-        if not valid:
-            return False, subMessage + message
-        if measurer["name"] in measurerNames:
-            return False, subMessage + "Duplicate measurer name: " + measurer["name"]
-        if measurer["variable"] not in variableNames:
-            return False, subMessage + "Measurer variable not found: " + measurer["variable"]
-        if measurer["driverKey"] not in deviceDrivers.keys():
-            return False, subMessage + "Measurer driver not found: " + measurer["driverKey"]
-        if measurer["variable"] in measurerVariables:
-            multipleMeasurers.append(measurer["variable"])
-        else:
-            measurerVariables.append(measurer["variable"])
-        measurerNames.append(measurer["name"])
-    effectorNames = []
-    for effector in machineConfig["effectors"].values():
-        try:
-            subMessage = str(effector["name"]) + ": "
-        except KeyError:
-            return False, "Effector missing name"
-        except TypeError:
-            return False, "Invalid effector name: " + str(effector["name"])
-        valid, message = validateConfig(effector, effectorConfigRules)
-        if not valid:
-            return False, subMessage + message
-        if effector["name"] in effectorNames:
-            return False, subMessage + "Duplicate effector name: " + effector["name"]
-        if effector["driverKey"] not in deviceDrivers.keys():
-            return False, subMessage + "Effector driver not found: " + effector["driverKey"]
-        for variable, variableType in controlTypeRequirements[effector["controlType"]].items():
-            if variable not in effector.keys():
-                return False, subMessage + "Effector missing required controlType variable: " + variable
-            if type(effector[variable]).__name__ != variableType:
-                return False, subMessage + "Effector controlType variable has invalid type: " + variable
-        if effector["controlType"] == "PID":
-            if len(effector["controlData"]) != 3:
-                return False, subMessage + "Effector controlType PID requires 3 controlData values"
-        if "controlVariable" in effector.keys():
-            if effector["controlVariable"] not in variableNames:
-                return False, subMessage + "Effector control variable not found: " + effector["controlVariable"]
-        effectorNames.append(effector["name"])
-    for variable in machineConfig["variables"].values():
-        if variable["name"] in multipleMeasurers:
-            if "sensorMixing" not in variable.keys():
-                return False, "Variable with multiple measurers missing sensor mixing: " + variable["name"]
-    lenTotalNames = len(variableNames + measurerNames + effectorNames)
-    lenUniqueNames = len(set(variableNames + measurerNames + effectorNames))
-    if lenTotalNames != lenUniqueNames:
-        return False, "Duplicate name found"
-    return True, ""
-
-
 def validateFullConfig(machineConfig, processConfig, deviceDrivers):
-    valid, message = validateMachineConfig(machineConfig, deviceDrivers)
-    if not valid:
-        return False, message
-    valid, message = validateConfig(processConfig, processConfigRules)
-    if not valid:
-        return False, message
-    if processConfig["forMachine"] != machineConfig["name"]:
-        return False, "Process forMachine: " + processConfig["forMachine"] + " does not match machine name: " + \
-                      machineConfig["name"]
-    stageNames = []
-    counter = 0
-    machineVariableNames = machineConfig["variables"].keys()
-    machineEffectorNames = machineConfig["effectors"].keys()
-    for stage in processConfig["stages"].keys():
-        if stage != str(counter):
-            return False, "Invalid stage order at stage: " + str(stage)
-        counter += 1
-        stageData = processConfig["stages"][stage]
-        try:
-            subMessage = str(stageData["name"]) + ": "
-        except KeyError:
-            return False, "Stage missing name"
-        except TypeError:
-            return False, "Invalid stage name: " + str(stageData["name"])
-        valid, message = validateConfig(stageData, stageConfigRules)
-        if not valid:
-            return False, subMessage + message
-        if "variableTargets" in stageData.keys():
-            for variable in stageData["variableTargets"].keys():
-                if variable not in machineVariableNames:
-                    return False, subMessage + "Variable " + variable + " not found"
-        if "effectorSettings" in stageData.keys():
-            for effector in stageData["effectorSettings"].keys():
-                if effector not in machineEffectorNames:
-                    return False, subMessage + "Effector " + effector + " not found"
-        if stageData["stageControl"] == "target":
-            if type(stageData["controlData"]).__name__ != "dict":
-                return False, subMessage + "Invalid controlData type: " + type(stageData["controlData"]).__name__
-            for key, value in stageData["controlData"].items():
-                if key not in machineVariableNames:
-                    return False, subMessage + "controlData variable " + key + " not found"
-                if type(value).__name__ != "list":
-                    return False, subMessage + "Invalid controlData value type, should be list: " + type(
-                        value).__name__
-                if len(value) != 2:
-                    return False, subMessage + "Invalid controlData value length: " + str(len(value))
-                if value[0] not in configEnumRules["stageControlTargets"]:
-                    return False, subMessage + "Invalid controlData comparative value: " + value[0]
-                if type(value[1]).__name__ != "int":
-                    return False, subMessage + "Invalid controlData taret value type, should be int: " + type(
-                        value[1]).__name__
-        elif stageData["stageControl"] == "time":
-            if type(stageData["controlData"]).__name__ != "int":
-                return False, subMessage + "Invalid controlData type, should be int: " + type(
-                    stageData["controlData"]).__name__
-        if stageData["name"] in stageNames:
-            return False, subMessage + "Duplicate stage name: " + stageData["name"]
-        stageNames.append(stageData["name"])
-    if "overrides" in processConfig.keys():
-        machineProcessConfig = copy.deepcopy(machineConfig)
-        valid, message = applyOverride(machineProcessConfig, processConfig["overrides"])
-        if not valid:
-            return False, "Process override invalid: " + message
-        valid, message = validateMachineConfig(machineProcessConfig, deviceDrivers)
-        if not valid:
-            return False, "Process override invalid: " + message
-    else:
-        machineProcessConfig = machineConfig
-    for stage, stageData in processConfig["stages"].items():
-        if "overrides" in stageData.keys():
-            machineStageConfig = copy.deepcopy(machineProcessConfig)
-            valid, message = applyOverride(machineStageConfig, stageData["overrides"])
-            if not valid:
-                return False, "Stage " + stage + " override invalid: " + message
-            valid, message = validateMachineConfig(machineStageConfig, deviceDrivers)
-            if not valid:
-                return False, "Stage " + stage + " override invalid: " + message
-        else:
-            machineStageConfig = machineProcessConfig
-        valid, message = validateStage(machineStageConfig, stageData)
-        if not valid:
-            return False, "Stage " + stage + " invalid: " + message
-    return True, ""
-
-
-def validateStage(machineStageConfig, stageData):
-    effectorVariables = {}
-    for effector in machineStageConfig["effectors"].values():
-        if "controlVariable" in effector.keys():
-            if effector["controlVariable"] not in effectorVariables.keys():
-                effectorVariables[effector["controlVariable"]] = []
-            effectorVariables[effector["controlVariable"]].append(effector["name"])
-    measurerVariables = []
-    for measurer in machineStageConfig["measurers"].values():
-        if measurer["variable"] not in measurerVariables:
-            measurerVariables.append(measurer["variable"])
-    for variable in effectorVariables.keys():
-        if variable not in measurerVariables:
-            return False, "Variable " + variable + " required by effector/s " + str(effectorVariables[
-                                                                                        variable]) + " but has no input"
-    if "effectorSettings" in stageData.keys():
-        for effector in stageData["effectorSettings"].keys():
-            if machineStageConfig["effectors"][effector]["controlType"] != "static":
-                return False, "Atempting to set value for non-static effector: " + effector
+    testedBaseMachineConfig = False
+    try:
+        validateNamespace(machineConfig, processConfig)
+        validateProcessConfig(processConfig, "Process Config: ")
+        for stage in processConfig["stages"].values():
+            if "overrides" in stage:
+                if stage["overrides"]:
+                    stageMachineConfig = copy.deepcopy(machineConfig)
+                    applyOverrides(stageMachineConfig, stage["overrides"], stage["name"] + "override failure: ")
+                    validateMachineConfig(stageMachineConfig, deviceDrivers, stage["name"] + "override: ")
+                    continue
+            if not testedBaseMachineConfig:
+                validateMachineConfig(machineConfig, deviceDrivers, stage["name"] + "no overrides: ")
+                testedBaseMachineConfig = True
+    except ValidationException as e:
+        return False, str(e)
     return True, ""
 
 
 if __name__ == "__main__":
     fakeMachineConfig = json.loads(open("fakeMachineConfig.json").read())
     fakeProcessConfig = json.loads(open("fakeProcessConfig.json").read())
-    print(validateFullConfig(fakeMachineConfig, fakeProcessConfig, deviceDrivers))
+    print(validateFullConfig(fakeMachineConfig, fakeProcessConfig, fakeDeviceDrivers))

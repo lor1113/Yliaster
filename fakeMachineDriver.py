@@ -16,7 +16,7 @@ def measureTemp():
     return temperature
 
 
-deviceDrivers = {
+fakeDeviceDrivers = {
     "heatMeasurer": measureTemp,
     "heatEffector": setHeater,
     "pumpControl": pumpWater

@@ -4,7 +4,7 @@ import queue
 import copy
 
 from fakeMachineDriver import deviceDrivers
-from configValidator import validateFullConfig, applyOverride
+from configValidator import validateFullConfig, applyOverrides
 
 
 class ProcessException(Exception):
@@ -21,7 +21,7 @@ def runMachineProcess(machineConfig, processConfig, deviceDrivers, queue):
         queue.put("VALIDATION OK")
         stageCounter = 0
         if "overrides" in processConfig:
-            applyOverride(machineConfig, processConfig["overrides"])
+            applyOverrides(machineConfig, processConfig["overrides"])
         timers = {}
         variableData = {x: {"value": None, "measurers": []} for x in machineConfig["variables"].keys()}
         measurerData = {x: {"value": None} for x in machineConfig["measurers"].keys()}
@@ -34,7 +34,7 @@ def runMachineProcess(machineConfig, processConfig, deviceDrivers, queue):
             stageData = processConfig["stages"][str(stageCounter)]
             stageConfig = copy.deepcopy(machineConfig)
             if "overrides" in stageData:
-                applyOverride(stageConfig, stageData["overrides"])
+                applyOverrides(stageConfig, stageData["overrides"])
             if "variableTargets" in stageData:
                 for variableName, variableTarget in stageData["variableTargets"].items():
                     variableData[variableName]["target"] = variableTarget

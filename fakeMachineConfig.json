@@ -5,13 +5,10 @@
     "temperature": {
       "name": "temperature",
       "description": "Machine internal temperature",
-      "safeMax": 100,
-      "safeMin": 0,
-      "shutdownMin": 18,
-      "shutdownMax": 30,
+      "safeRange": [100,0],
+      "shutdownRange": [20,35],
       "sensorMixing": "min",
-      "visible": true,
-      "defaultTarget": 23
+      "visible": true
     }
   },
   "measurers": {
@@ -21,7 +18,7 @@
       "active": true,
       "variable": "temperature",
       "driverKey": "heatMeasurer",
-      "remeasureMS": 1000
+      "iterateMS": 1000
     },
     "temperatureProbe2":{
       "name": "temperatureProbe2",
@@ -29,7 +26,7 @@
       "active": true,
       "variable": "temperature",
       "driverKey": "heatMeasurer",
-      "remeasureMS": 1000,
+      "iterateMS": 1000,
       "offsetMS": 500
       }
     },
@@ -40,8 +37,8 @@
       "active": true,
       "controlType": "binary",
       "controlVariable": "temperature",
-      "controlData": 20,
-      "readjustMS": 5000,
+      "controlBinaryThreshold": 20,
+      "minChangeDelayMS": 5000,
       "shutdownSetting": 0,
       "driverKey": "heatEffector"
     },
